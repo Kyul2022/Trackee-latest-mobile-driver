@@ -17,42 +17,68 @@ class MainActivity : ComponentActivity() {
     private val locationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+        val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        val notificationGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions[Manifest.permission.POST_NOTIFICATIONS] == true
+        } else true
+
+        if (fineLocationGranted || coarseLocationGranted) {
             startLocationService()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Check if tokens exist and user is already logged in
+        val savedAccessToken = TokenManager.getAccessToken(this)
+
         setContent {
             TrackeeDriverTheme {
-                var isLoggedIn by remember { mutableStateOf(false) }
-                var token by remember { mutableStateOf("") }
+                var isLoggedIn by remember { mutableStateOf(!savedAccessToken.isNullOrEmpty()) }
+                var accessToken by remember { mutableStateOf(savedAccessToken ?: "") }
 
                 if (isLoggedIn) {
-                    DashboardScreen() { requestLocationPermissions() }
+                    DashboardScreen { requestLocationPermissions() }
                 } else {
-                    LoginScreen { receivedToken ->
-                        token = receivedToken
+                    LoginScreen { access, refresh ->
+                        accessToken = access
                         isLoggedIn = true
-                        TokenManager.saveToken(this@MainActivity, receivedToken)
+                        TokenManager.saveAccessToken(this@MainActivity, access)
+                        TokenManager.saveRefreshToken(this@MainActivity, refresh)
                         requestLocationPermissions()
                     }
                 }
             }
         }
+
+        // If already logged in, request permissions immediately
+        if (!savedAccessToken.isNullOrEmpty()) {
+            requestLocationPermissions()
+        }
     }
 
     private fun requestLocationPermissions() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            locationPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.FOREGROUND_SERVICE
-                )
-            )
+        val permissionsToRequest = mutableListOf<String>()
+
+        // Location permissions
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+
+        // Notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            locationPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
             startLocationService()
         }

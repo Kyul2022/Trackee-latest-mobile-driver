@@ -1,5 +1,7 @@
 package com.example.trackee_driver
 
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -15,10 +17,9 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.io.IOException
 
 @Composable
-fun LoginScreen(onLoginSuccess: (String) -> Unit) {
+fun LoginScreen(onLoginSuccess: (String, String) -> Unit) { // returns both tokens
     val context = LocalContext.current
     var matricule by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -60,11 +61,13 @@ fun LoginScreen(onLoginSuccess: (String) -> Unit) {
             isLoading = true
             CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val token = loginToBackend(matricule, password)
+                    val tokens = loginToBackend(matricule, password)
                     withContext(Dispatchers.Main) {
                         isLoading = false
-                        if (token != null) {
-                            onLoginSuccess(token)
+                        if (tokens != null) {
+                            val (accessToken, refreshToken) = tokens
+                            Toast.makeText(context, "Bienvenue", Toast.LENGTH_LONG).show()
+                            onLoginSuccess(accessToken, refreshToken)
                         } else {
                             errorMessage = "Invalid username or password"
                         }
@@ -92,21 +95,29 @@ fun LoginScreen(onLoginSuccess: (String) -> Unit) {
     }
 }
 
-private fun loginToBackend(matricule: String, password: String): String? {
+private fun loginToBackend(matricule: String, password: String
+): Pair<String, String>? {
     val client = OkHttpClient()
     val json = JSONObject().apply {
-        put("matricule", matricule)
+        put("email", matricule)
         put("password", password)
     }.toString()
 
     val request = Request.Builder()
-        .url("http://172.20.197.225:8080/auth/login") // ton endpoint Spring
+        .url("http://192.168.137.1:8080/api/users/login")
         .post(json.toRequestBody("application/json".toMediaTypeOrNull()))
         .build()
 
     client.newCall(request).execute().use { response ->
         return if (response.isSuccessful) {
-            response.body?.string()?.replace("\"", "") // supprime les quotes si le token est entre ""
+            val body = response.body?.string()
+            if (body != null) {
+                val obj = JSONObject(body)
+                val tokenObj = obj.getJSONObject("token")       // get the "token" object
+                val accessToken = tokenObj.getString("access_token")
+                val refreshToken = tokenObj.getString("refresh_token")    // refresh_token is top-level
+                accessToken to refreshToken
+            } else null
         } else {
             null
         }
